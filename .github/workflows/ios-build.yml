@@ -22,7 +22,7 @@ jobs:
       - name: Install Dependencies
         run: npm install --legacy-peer-deps
 
-      - name: Prepare Web Assets & Fix Paths
+      - name: Prepare Web Assets & Configure Plugins
         run: |
           mkdir -p dist
           if [ -d "ios/App/App/public" ] && [ ! -f "dist/index.html" ]; then
@@ -31,10 +31,53 @@ jobs:
           if [ ! -f "dist/index.html" ]; then
             echo '<!DOCTYPE html><html><head><meta charset="utf-8"><title>QWERcrool</title></head><body></body></html>' > dist/index.html
           fi
-          # Fix Windows backslashes for macOS SPM
-          sed -i '' 's/\\/\//g' ios/App/CapApp-SPM/Package.swift 2>/dev/null || true
-          # Remove unused cordova podspec folder
+
+          # Clean legacy podspec folder
           rm -rf ios/capacitor-cordova-ios-plugins
+
+          # Generate clean SPM Package.swift with forward slashes and verified plugins
+          cat << 'EOF' > ios/App/CapApp-SPM/Package.swift
+          // swift-tools-version: 5.9
+          import PackageDescription
+
+          let package = Package(
+              name: "CapApp-SPM",
+              platforms: [.iOS(.v15)],
+              products: [
+                  .library(name: "CapApp-SPM", targets: ["CapApp-SPM"])
+              ],
+              dependencies: [
+                  .package(url: "https://github.com/ionic-team/capacitor-swift-pm.git", exact: "8.5.0"),
+                  .package(name: "CapacitorApp", path: "../../../node_modules/@capacitor/app"),
+                  .package(name: "CapacitorCamera", path: "../../../node_modules/@capacitor/camera"),
+                  .package(name: "CapacitorClipboard", path: "../../../node_modules/@capacitor/clipboard"),
+                  .package(name: "CapacitorDevice", path: "../../../node_modules/@capacitor/device"),
+                  .package(name: "CapacitorHaptics", path: "../../../node_modules/@capacitor/haptics"),
+                  .package(name: "CapacitorKeyboard", path: "../../../node_modules/@capacitor/keyboard"),
+                  .package(name: "CapacitorLocalNotifications", path: "../../../node_modules/@capacitor/local-notifications"),
+                  .package(name: "CapacitorNetwork", path: "../../../node_modules/@capacitor/network"),
+                  .package(name: "CapacitorShare", path: "../../../node_modules/@capacitor/share")
+              ],
+              targets: [
+                  .target(
+                      name: "CapApp-SPM",
+                      dependencies: [
+                          .product(name: "Capacitor", package: "capacitor-swift-pm"),
+                          .product(name: "Cordova", package: "capacitor-swift-pm"),
+                          .product(name: "CapacitorApp", package: "CapacitorApp"),
+                          .product(name: "CapacitorCamera", package: "CapacitorCamera"),
+                          .product(name: "CapacitorClipboard", package: "CapacitorClipboard"),
+                          .product(name: "CapacitorDevice", package: "CapacitorDevice"),
+                          .product(name: "CapacitorHaptics", package: "CapacitorHaptics"),
+                          .product(name: "CapacitorKeyboard", package: "CapacitorKeyboard"),
+                          .product(name: "CapacitorLocalNotifications", package: "CapacitorLocalNotifications"),
+                          .product(name: "CapacitorNetwork", package: "CapacitorNetwork"),
+                          .product(name: "CapacitorShare", package: "CapacitorShare")
+                      ]
+                  )
+              ]
+          )
+          EOF
 
       - name: Create Shared Scheme
         run: |
@@ -70,7 +113,7 @@ jobs:
           cd ios/App
           mkdir -p build/Payload
           APP_PATH=$(find build/Build/Products/Release-iphoneos -name "*.app" -type d | head -n 1)
-          echo "Found app at: $APP_PATH"
+          echo "Found compiled app at: $APP_PATH"
           cp -R "$APP_PATH" build/Payload/
           cd build
           zip -qr QWERcrool.ipa Payload
