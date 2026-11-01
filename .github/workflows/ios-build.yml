@@ -91,6 +91,39 @@ jobs:
           }
           EOF
 
+      - name: Process & Generate App Icons
+        run: |
+          python3 -m pip install pillow
+          python3 -c "
+          from PIL import Image, ImageDraw
+          import os, glob
+
+          candidates = [f for f in glob.glob('ios/icone*') + glob.glob('ios/icone.*') if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
+          if candidates:
+              print('Found icon source:', candidates[0])
+              im = Image.open(candidates[0])
+              bbox = im.getbbox()
+              content = im.crop(bbox)
+
+              master = Image.new('RGBA', (1024, 1024), (8, 8, 15, 255))
+              draw = ImageDraw.Draw(master)
+              for r in range(400, 0, -10):
+                  draw.ellipse([512 - r, 512 - r, 512 + r, 512 + r], fill=(24, 14, 48, int(35 * (1 - r / 400))))
+
+              target_w = 780
+              target_h = int(content.height * (target_w / content.width))
+              content_resized = content.resize((target_w, target_h), Image.Resampling.LANCZOS)
+              master.alpha_composite(content_resized, ((1024 - target_w) // 2, (1024 - target_h) // 2))
+              master_rgb = master.convert('RGB')
+
+              appicon_dir = 'ios/App/App/Assets.xcassets/AppIcon.appiconset'
+              os.makedirs(appicon_dir, exist_ok=True)
+              master_rgb.save(os.path.join(appicon_dir, 'AppIcon-512@2x.png'), 'PNG')
+              print('Successfully generated AppIcon-512@2x.png for Xcode!')
+          else:
+              print('Warning: No icon source found in ios/icone.*')
+          "
+
       - name: Create Shared Scheme & Native Plugins
         run: |
           mkdir -p ios/App/App.xcodeproj/xcshareddata/xcschemes
