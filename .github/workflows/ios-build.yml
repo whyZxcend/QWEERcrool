@@ -36,7 +36,7 @@ jobs:
           # Clean legacy podspec folder
           rm -rf ios/capacitor-cordova-ios-plugins
 
-          # Generate clean SPM Package.swift with stable verified plugins
+          # Generate clean SPM Package.swift with pure core Capacitor runtime
           cat << 'EOF' > ios/App/CapApp-SPM/Package.swift
           // swift-tools-version: 5.9
           import PackageDescription
@@ -48,23 +48,50 @@ jobs:
                   .library(name: "CapApp-SPM", targets: ["CapApp-SPM"])
               ],
               dependencies: [
-                  .package(url: "https://github.com/ionic-team/capacitor-swift-pm.git", exact: "8.5.0"),
-                  .package(name: "CapacitorKeyboard", path: "../../../node_modules/@capacitor/keyboard")
+                  .package(url: "https://github.com/ionic-team/capacitor-swift-pm.git", exact: "8.5.0")
               ],
               targets: [
                   .target(
                       name: "CapApp-SPM",
                       dependencies: [
                           .product(name: "Capacitor", package: "capacitor-swift-pm"),
-                          .product(name: "Cordova", package: "capacitor-swift-pm"),
-                          .product(name: "CapacitorKeyboard", package: "CapacitorKeyboard")
+                          .product(name: "Cordova", package: "capacitor-swift-pm")
                       ]
                   )
               ]
           )
           EOF
 
-      - name: Create Shared Scheme & Setup AppDelegate
+          # Configure capacitor.config.json with native Camera & Notifications plugins
+          cat << 'EOF' > ios/App/App/capacitor.config.json
+          {
+            "appId": "online.qwercrool.app",
+            "appName": "QWERcrool",
+            "webDir": "dist",
+            "server": {
+              "url": "https://qwercrool.online",
+              "cleartext": true,
+              "androidScheme": "https"
+            },
+            "android": {
+              "allowMixedContent": true,
+              "captureInput": false,
+              "backgroundColor": "#0d0f17"
+            },
+            "ios": {
+              "contentInset": "never",
+              "backgroundColor": "#0d0f17",
+              "allowsLinkPreview": false,
+              "scrollEnabled": false
+            },
+            "packageClassList": [
+              "CAPCameraPlugin",
+              "LocalNotificationsPlugin"
+            ]
+          }
+          EOF
+
+      - name: Create Shared Scheme & Native Plugins
         run: |
           mkdir -p ios/App/App.xcodeproj/xcshareddata/xcschemes
           cat << 'EOF' > ios/App/App.xcodeproj/xcshareddata/xcschemes/App.xcscheme
@@ -84,6 +111,7 @@ jobs:
           import UIKit
           import Capacitor
           import UserNotifications
+          import PhotosUI
 
           @UIApplicationMain
           class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterDelegate {
@@ -130,6 +158,225 @@ jobs:
 
               func application(_ application: UIApplication, continue userActivity: NSUserActivity, restorationHandler: @escaping ([UIUserActivityRestoring]?) -> Void) -> Bool {
                   return true
+              }
+          }
+
+          // MARK: - Native Camera & Telegram-style PHPicker Gallery
+          @objc(CAPCameraPlugin)
+          public class CAPCameraPlugin: CAPPlugin, CAPBridgedPlugin, PHPickerViewControllerDelegate, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
+              public let identifier = "CAPCameraPlugin"
+              public let jsName = "Camera"
+              public let pluginMethods: [CAPPluginMethod] = [
+                  CAPPluginMethod(name: "pickImages", returnType: CAPPluginMethodReturnPromise),
+                  CAPPluginMethod(name: "getPhoto", returnType: CAPPluginMethodReturnPromise),
+                  CAPPluginMethod(name: "checkPermissions", returnType: CAPPluginMethodReturnPromise),
+                  CAPPluginMethod(name: "requestPermissions", returnType: CAPPluginMethodReturnPromise)
+              ]
+
+              private var activeCall: CAPPluginCall?
+
+              @objc public func checkPermissions(_ call: CAPPluginCall) {
+                  call.resolve([
+                      "camera": "granted",
+                      "photos": "granted"
+                  ])
+              }
+
+              @objc public func requestPermissions(_ call: CAPPluginCall) {
+                  call.resolve([
+                      "camera": "granted",
+                      "photos": "granted"
+                  ])
+              }
+
+              @objc public func pickImages(_ call: CAPPluginCall) {
+                  DispatchQueue.main.async { [weak self] in
+                      guard let self = self else { return }
+                      self.activeCall = call
+
+                      var config = PHPickerConfiguration(photoLibrary: .shared())
+                      let limit = call.getInt("limit") ?? 10
+                      config.selectionLimit = limit
+                      config.filter = .any(of: [.images, .videos])
+
+                      let picker = PHPickerViewController(configuration: config)
+                      picker.delegate = self
+                      self.bridge?.viewController?.present(picker, animated: true)
+                  }
+              }
+
+              @objc public func getPhoto(_ call: CAPPluginCall) {
+                  DispatchQueue.main.async { [weak self] in
+                      guard let self = self else { return }
+                      self.activeCall = call
+
+                      if UIImagePickerController.isSourceTypeAvailable(.camera) {
+                          let picker = UIImagePickerController()
+                          picker.sourceType = .camera
+                          picker.delegate = self
+                          self.bridge?.viewController?.present(picker, animated: true)
+                      } else {
+                          call.reject("Camera is not available on this device")
+                      }
+                  }
+              }
+
+              public func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
+                  picker.dismiss(animated: true)
+
+                  guard let call = self.activeCall else { return }
+                  self.activeCall = nil
+
+                  if results.isEmpty {
+                      call.resolve(["photos": []])
+                      return
+                  }
+
+                  let group = DispatchGroup()
+                  var photos: [[String: Any]] = []
+                  let tempDir = FileManager.default.temporaryDirectory
+
+                  for result in results {
+                      let provider = result.itemProvider
+                      if provider.canLoadObject(ofClass: UIImage.self) {
+                          group.enter()
+                          provider.loadObject(ofClass: UIImage.self) { [weak self] image, _ in
+                              defer { group.leave() }
+                              guard let self = self, let uiImage = image as? UIImage,
+                                    let data = uiImage.jpegData(compressionQuality: 0.85) else { return }
+
+                              let filename = "\(UUID().uuidString).jpg"
+                              let fileURL = tempDir.appendingPathComponent(filename)
+                              do {
+                                  try data.write(to: fileURL)
+                                  let webPath = self.bridge?.portablePath(fromLocalURL: fileURL)?.absoluteString ?? fileURL.absoluteString
+                                  photos.append([
+                                      "webPath": webPath,
+                                      "format": "jpeg"
+                                  ])
+                              } catch {}
+                          }
+                      } else if provider.hasItemConformingToTypeIdentifier("public.movie") {
+                          group.enter()
+                          provider.loadFileRepresentation(forTypeIdentifier: "public.movie") { [weak self] url, _ in
+                              defer { group.leave() }
+                              guard let self = self, let srcURL = url else { return }
+                              let filename = "\(UUID().uuidString).\(srcURL.pathExtension)"
+                              let destURL = tempDir.appendingPathComponent(filename)
+                              do {
+                                  try? FileManager.default.removeItem(at: destURL)
+                                  try FileManager.default.copyItem(at: srcURL, to: destURL)
+                                  let webPath = self.bridge?.portablePath(fromLocalURL: destURL)?.absoluteString ?? destURL.absoluteString
+                                  photos.append([
+                                      "webPath": webPath,
+                                      "format": srcURL.pathExtension
+                                  ])
+                              } catch {}
+                          }
+                      }
+                  }
+
+                  group.notify(queue: .main) {
+                      call.resolve(["photos": photos])
+                  }
+              }
+
+              public func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey : Any]) {
+                  picker.dismiss(animated: true)
+
+                  guard let call = self.activeCall else { return }
+                  self.activeCall = nil
+
+                  guard let image = info[.originalImage] as? UIImage,
+                        let data = image.jpegData(compressionQuality: 0.85) else {
+                      call.reject("Could not get photo data")
+                      return
+                  }
+
+                  let tempDir = FileManager.default.temporaryDirectory
+                  let filename = "\(UUID().uuidString).jpg"
+                  let fileURL = tempDir.appendingPathComponent(filename)
+                  do {
+                      try data.write(to: fileURL)
+                      let webPath = self.bridge?.portablePath(fromLocalURL: fileURL)?.absoluteString ?? fileURL.absoluteString
+                      call.resolve([
+                          "webPath": webPath,
+                          "format": "jpeg"
+                      ])
+                  } catch {
+                      call.reject("Could not save photo: \(error.localizedDescription)")
+                  }
+              }
+
+              public func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
+                  picker.dismiss(animated: true)
+                  self.activeCall?.reject("User cancelled")
+                  self.activeCall = nil
+              }
+          }
+
+          // MARK: - Native Local Notifications
+          @objc(LocalNotificationsPlugin)
+          public class LocalNotificationsPlugin: CAPPlugin, CAPBridgedPlugin {
+              public let identifier = "LocalNotificationsPlugin"
+              public let jsName = "LocalNotifications"
+              public let pluginMethods: [CAPPluginMethod] = [
+                  CAPPluginMethod(name: "checkPermissions", returnType: CAPPluginMethodReturnPromise),
+                  CAPPluginMethod(name: "requestPermissions", returnType: CAPPluginMethodReturnPromise),
+                  CAPPluginMethod(name: "createChannel", returnType: CAPPluginMethodReturnPromise),
+                  CAPPluginMethod(name: "schedule", returnType: CAPPluginMethodReturnPromise),
+                  CAPPluginMethod(name: "addListener", returnType: CAPPluginMethodReturnPromise),
+                  CAPPluginMethod(name: "removeAllListeners", returnType: CAPPluginMethodReturnPromise)
+              ]
+
+              @objc public func checkPermissions(_ call: CAPPluginCall) {
+                  UNUserNotificationCenter.current().getNotificationSettings { settings in
+                      let granted = settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional
+                      call.resolve(["display": granted ? "granted" : "denied"])
+                  }
+              }
+
+              @objc public func requestPermissions(_ call: CAPPluginCall) {
+                  UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { granted, _ in
+                      call.resolve(["display": granted ? "granted" : "denied"])
+                  }
+              }
+
+              @objc public func createChannel(_ call: CAPPluginCall) {
+                  call.resolve()
+              }
+
+              @objc public func schedule(_ call: CAPPluginCall) {
+                  guard let notifications = call.options["notifications"] as? [[String: Any]] else {
+                      call.resolve()
+                      return
+                  }
+
+                  for notif in notifications {
+                      let content = UNMutableNotificationContent()
+                      content.title = (notif["title"] as? String) ?? "QWERcrool"
+                      content.body = (notif["body"] as? String) ?? ""
+                      content.sound = .default
+                      if let extra = notif["extra"] as? [String: Any] {
+                          content.userInfo = extra
+                      }
+
+                      let id = "\(notif["id"] ?? UUID().uuidString)"
+                      let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 0.1, repeats: false)
+                      let request = UNNotificationRequest(identifier: id, content: content, trigger: trigger)
+
+                      UNUserNotificationCenter.current().add(request)
+                  }
+
+                  call.resolve()
+              }
+
+              @objc public func addListener(_ call: CAPPluginCall) {
+                  call.resolve()
+              }
+
+              @objc public func removeAllListeners(_ call: CAPPluginCall) {
+                  call.resolve()
               }
           }
           EOF
