@@ -13,10 +13,10 @@
 		"backgroundColor": "#0d0f17"
 	},
 	"ios": {
-		"contentInset": "automatic",
+		"contentInset": "never",
 		"backgroundColor": "#0d0f17",
 		"allowsLinkPreview": false,
-		"scrollEnabled": true
+		"scrollEnabled": false
 	},
 	"plugins": {
 		"SplashScreen": {
@@ -31,11 +31,6 @@
 			"style": "DARK",
 			"backgroundColor": "#0d0f17"
 		},
-		"Keyboard": {
-			"resize": "none",
-			"style": "DARK",
-			"resizeOnFullScreen": false
-		},
 		"LocalNotifications": {
 			"smallIcon": "ic_stat_notification",
 			"iconColor": "#7c5bf5",
@@ -43,16 +38,7 @@
 		}
 	},
 	"packageClassList": [
-		"AppPlugin",
 		"CAPCameraPlugin",
-		"ClipboardPlugin",
-		"DevicePlugin",
-		"HapticsPlugin",
-		"KeyboardPlugin",
-		"LocalNotificationsPlugin",
-		"CAPNetworkPlugin",
-		"SharePlugin",
-		"SplashScreenPlugin",
-		"StatusBarPlugin"
+		"LocalNotificationsPlugin"
 	]
 }
