@@ -107,6 +107,9 @@ jobs:
           </Scheme>
           EOF
 
+          # Point Main.storyboard to MainViewController so capacitorDidLoad executes
+          sed -i '' 's/customClass="CAPBridgeViewController" customModule="Capacitor"/customClass="MainViewController" customModuleProvider="target"/g' ios/App/App/Base.lproj/Main.storyboard
+
           cat << 'EOF' > ios/App/App/AppDelegate.swift
           import UIKit
           import Capacitor
@@ -158,6 +161,15 @@ jobs:
 
               func application(_ application: UIApplication, continue userActivity: NSUserActivity, restorationHandler: @escaping ([UIUserActivityRestoring]?) -> Void) -> Bool {
                   return true
+              }
+          }
+
+          // MARK: - Custom Bridge View Controller to explicitly register native plugins
+          class MainViewController: CAPBridgeViewController {
+              override func capacitorDidLoad() {
+                  super.capacitorDidLoad()
+                  bridge?.registerPluginInstance(CAPCameraPlugin())
+                  bridge?.registerPluginInstance(LocalNotificationsPlugin())
               }
           }
 
