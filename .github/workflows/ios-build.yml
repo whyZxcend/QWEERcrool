@@ -167,22 +167,28 @@ jobs:
               public let identifier = "CAPCameraPlugin"
               public let jsName = "Camera"
               public let pluginMethods: [CAPPluginMethod] = [
-                  CAPPluginMethod(name: "pickImages", returnType: CAPPluginMethodReturnPromise),
-                  CAPPluginMethod(name: "getPhoto", returnType: CAPPluginMethodReturnPromise),
-                  CAPPluginMethod(name: "checkPermissions", returnType: CAPPluginMethodReturnPromise),
-                  CAPPluginMethod(name: "requestPermissions", returnType: CAPPluginMethodReturnPromise)
+                  CAPPluginMethod(name: "pickImages", returnType: "promise"),
+                  CAPPluginMethod(name: "getPhoto", returnType: "promise"),
+                  CAPPluginMethod(name: "checkPermissions", returnType: "promise"),
+                  CAPPluginMethod(name: "requestPermissions", returnType: "promise")
               ]
 
               private var activeCall: CAPPluginCall?
 
-              @objc public func checkPermissions(_ call: CAPPluginCall) {
+              private func getTopViewController() -> UIViewController? {
+                  let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+                  let windows = scenes.flatMap { $0.windows }
+                  return windows.first(where: { $0.isKeyWindow })?.rootViewController
+              }
+
+              override public func checkPermissions(_ call: CAPPluginCall) {
                   call.resolve([
                       "camera": "granted",
                       "photos": "granted"
                   ])
               }
 
-              @objc public func requestPermissions(_ call: CAPPluginCall) {
+              override public func requestPermissions(_ call: CAPPluginCall) {
                   call.resolve([
                       "camera": "granted",
                       "photos": "granted"
@@ -195,13 +201,18 @@ jobs:
                       self.activeCall = call
 
                       var config = PHPickerConfiguration(photoLibrary: .shared())
-                      let limit = call.getInt("limit") ?? 10
+                      let limit = call.getInt("limit", 10)
                       config.selectionLimit = limit
                       config.filter = .any(of: [.images, .videos])
 
                       let picker = PHPickerViewController(configuration: config)
                       picker.delegate = self
-                      self.bridge?.viewController?.present(picker, animated: true)
+
+                      guard let topVC = self.getTopViewController() else {
+                          call.resolve(["photos": []])
+                          return
+                      }
+                      topVC.present(picker, animated: true)
                   }
               }
 
@@ -214,9 +225,14 @@ jobs:
                           let picker = UIImagePickerController()
                           picker.sourceType = .camera
                           picker.delegate = self
-                          self.bridge?.viewController?.present(picker, animated: true)
+
+                          guard let topVC = self.getTopViewController() else {
+                              call.resolve([:])
+                              return
+                          }
+                          topVC.present(picker, animated: true)
                       } else {
-                          call.reject("Camera is not available on this device")
+                          call.resolve([:])
                       }
                   }
               }
@@ -234,44 +250,35 @@ jobs:
 
                   let group = DispatchGroup()
                   var photos: [[String: Any]] = []
-                  let tempDir = FileManager.default.temporaryDirectory
 
                   for result in results {
                       let provider = result.itemProvider
                       if provider.canLoadObject(ofClass: UIImage.self) {
                           group.enter()
-                          provider.loadObject(ofClass: UIImage.self) { [weak self] image, _ in
+                          provider.loadObject(ofClass: UIImage.self) { image, _ in
                               defer { group.leave() }
-                              guard let self = self, let uiImage = image as? UIImage,
+                              guard let uiImage = image as? UIImage,
                                     let data = uiImage.jpegData(compressionQuality: 0.85) else { return }
 
-                              let filename = "\(UUID().uuidString).jpg"
-                              let fileURL = tempDir.appendingPathComponent(filename)
-                              do {
-                                  try data.write(to: fileURL)
-                                  let webPath = self.bridge?.portablePath(fromLocalURL: fileURL)?.absoluteString ?? fileURL.absoluteString
-                                  photos.append([
-                                      "webPath": webPath,
-                                      "format": "jpeg"
-                                  ])
-                              } catch {}
+                              let base64 = data.base64EncodedString()
+                              let webPath = "data:image/jpeg;base64,\(base64)"
+                              photos.append([
+                                  "webPath": webPath,
+                                  "format": "jpeg"
+                              ])
                           }
                       } else if provider.hasItemConformingToTypeIdentifier("public.movie") {
                           group.enter()
-                          provider.loadFileRepresentation(forTypeIdentifier: "public.movie") { [weak self] url, _ in
+                          provider.loadFileRepresentation(forTypeIdentifier: "public.movie") { url, _ in
                               defer { group.leave() }
-                              guard let self = self, let srcURL = url else { return }
-                              let filename = "\(UUID().uuidString).\(srcURL.pathExtension)"
-                              let destURL = tempDir.appendingPathComponent(filename)
-                              do {
-                                  try? FileManager.default.removeItem(at: destURL)
-                                  try FileManager.default.copyItem(at: srcURL, to: destURL)
-                                  let webPath = self.bridge?.portablePath(fromLocalURL: destURL)?.absoluteString ?? destURL.absoluteString
-                                  photos.append([
-                                      "webPath": webPath,
-                                      "format": srcURL.pathExtension
-                                  ])
-                              } catch {}
+                              guard let srcURL = url, let data = try? Data(contentsOf: srcURL) else { return }
+                              let ext = srcURL.pathExtension.isEmpty ? "mp4" : srcURL.pathExtension
+                              let base64 = data.base64EncodedString()
+                              let webPath = "data:video/\(ext);base64,\(base64)"
+                              photos.append([
+                                  "webPath": webPath,
+                                  "format": ext
+                              ])
                           }
                       }
                   }
@@ -289,28 +296,21 @@ jobs:
 
                   guard let image = info[.originalImage] as? UIImage,
                         let data = image.jpegData(compressionQuality: 0.85) else {
-                      call.reject("Could not get photo data")
+                      call.resolve([:])
                       return
                   }
 
-                  let tempDir = FileManager.default.temporaryDirectory
-                  let filename = "\(UUID().uuidString).jpg"
-                  let fileURL = tempDir.appendingPathComponent(filename)
-                  do {
-                      try data.write(to: fileURL)
-                      let webPath = self.bridge?.portablePath(fromLocalURL: fileURL)?.absoluteString ?? fileURL.absoluteString
-                      call.resolve([
-                          "webPath": webPath,
-                          "format": "jpeg"
-                      ])
-                  } catch {
-                      call.reject("Could not save photo: \(error.localizedDescription)")
-                  }
+                  let base64 = data.base64EncodedString()
+                  let webPath = "data:image/jpeg;base64,\(base64)"
+                  call.resolve([
+                      "webPath": webPath,
+                      "format": "jpeg"
+                  ])
               }
 
               public func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
                   picker.dismiss(animated: true)
-                  self.activeCall?.reject("User cancelled")
+                  self.activeCall?.resolve([:])
                   self.activeCall = nil
               }
           }
@@ -321,22 +321,22 @@ jobs:
               public let identifier = "LocalNotificationsPlugin"
               public let jsName = "LocalNotifications"
               public let pluginMethods: [CAPPluginMethod] = [
-                  CAPPluginMethod(name: "checkPermissions", returnType: CAPPluginMethodReturnPromise),
-                  CAPPluginMethod(name: "requestPermissions", returnType: CAPPluginMethodReturnPromise),
-                  CAPPluginMethod(name: "createChannel", returnType: CAPPluginMethodReturnPromise),
-                  CAPPluginMethod(name: "schedule", returnType: CAPPluginMethodReturnPromise),
-                  CAPPluginMethod(name: "addListener", returnType: CAPPluginMethodReturnPromise),
-                  CAPPluginMethod(name: "removeAllListeners", returnType: CAPPluginMethodReturnPromise)
+                  CAPPluginMethod(name: "checkPermissions", returnType: "promise"),
+                  CAPPluginMethod(name: "requestPermissions", returnType: "promise"),
+                  CAPPluginMethod(name: "createChannel", returnType: "promise"),
+                  CAPPluginMethod(name: "schedule", returnType: "promise"),
+                  CAPPluginMethod(name: "addListener", returnType: "promise"),
+                  CAPPluginMethod(name: "removeAllListeners", returnType: "promise")
               ]
 
-              @objc public func checkPermissions(_ call: CAPPluginCall) {
+              override public func checkPermissions(_ call: CAPPluginCall) {
                   UNUserNotificationCenter.current().getNotificationSettings { settings in
                       let granted = settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional
                       call.resolve(["display": granted ? "granted" : "denied"])
                   }
               }
 
-              @objc public func requestPermissions(_ call: CAPPluginCall) {
+              override public func requestPermissions(_ call: CAPPluginCall) {
                   UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { granted, _ in
                       call.resolve(["display": granted ? "granted" : "denied"])
                   }
@@ -371,11 +371,11 @@ jobs:
                   call.resolve()
               }
 
-              @objc public func addListener(_ call: CAPPluginCall) {
+              override public func addListener(_ call: CAPPluginCall) {
                   call.resolve()
               }
 
-              @objc public func removeAllListeners(_ call: CAPPluginCall) {
+              override public func removeAllListeners(_ call: CAPPluginCall) {
                   call.resolve()
               }
           }
