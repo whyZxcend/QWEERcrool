@@ -80,18 +80,27 @@ jobs:
           </Scheme>
           EOF
 
-      - name: Build iOS App (Unsigned)
+      - name: Build iOS App (Ad-hoc Signed for Sideloading)
         run: |
           cd ios/App
+          set -o pipefail
           xcodebuild -project App.xcodeproj \
             -scheme App \
             -configuration Release \
             -destination 'generic/platform=iOS' \
             -derivedDataPath build \
-            CODE_SIGN_IDENTITY="" \
+            CODE_SIGN_IDENTITY="-" \
             CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO \
-            build
+            CODE_SIGNING_ALLOWED=YES \
+            CODE_SIGN_ENTITLEMENTS="" \
+            PROVISIONING_PROFILE_SPECIFIER="" \
+            PROVISIONING_PROFILE="" \
+            DEVELOPMENT_TEAM="" \
+            build 2>&1 | tee xcodebuild.log || {
+              echo "=== BUILD FAILED. LAST 60 LINES OF XCODE LOG: ==="
+              tail -n 60 xcodebuild.log
+              exit 1
+            }
 
       - name: Package into IPA
         run: |
