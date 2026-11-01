@@ -85,8 +85,8 @@ jobs:
               "scrollEnabled": false
             },
             "packageClassList": [
-              "CAPCameraPlugin",
-              "LocalNotificationsPlugin"
+              "Camera",
+              "LocalNotifications"
             ]
           }
           EOF
@@ -107,8 +107,8 @@ jobs:
           </Scheme>
           EOF
 
-          # Point Main.storyboard to MainViewController so capacitorDidLoad executes
-          sed -i '' 's/customClass="CAPBridgeViewController" customModule="Capacitor"/customClass="MainViewController" customModuleProvider="target"/g' ios/App/App/Base.lproj/Main.storyboard
+          # Ensure Main.storyboard uses standard CAPBridgeViewController
+          sed -i '' 's/customClass="MainViewController" customModuleProvider="target"/customClass="CAPBridgeViewController" customModule="Capacitor"/g' ios/App/App/Base.lproj/Main.storyboard
 
           cat << 'EOF' > ios/App/App/AppDelegate.swift
           import UIKit
@@ -164,19 +164,10 @@ jobs:
               }
           }
 
-          // MARK: - Custom Bridge View Controller to explicitly register native plugins
-          class MainViewController: CAPBridgeViewController {
-              override func capacitorDidLoad() {
-                  super.capacitorDidLoad()
-                  self.bridge?.registerPluginInstance(CAPCameraPlugin())
-                  self.bridge?.registerPluginInstance(LocalNotificationsPlugin())
-              }
-          }
-
           // MARK: - Native Camera & Telegram-style PHPicker Gallery
-          @objc(CAPCameraPlugin)
-          public class CAPCameraPlugin: CAPPlugin, CAPBridgedPlugin, PHPickerViewControllerDelegate, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
-              public let identifier = "CAPCameraPlugin"
+          @objc(Camera)
+          public class CameraPlugin: CAPPlugin, CAPBridgedPlugin, PHPickerViewControllerDelegate, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
+              public let identifier = "CameraPlugin"
               public let jsName = "Camera"
               public let pluginMethods: [CAPPluginMethod] = [
                   CAPPluginMethod(name: "pickImages", returnType: "promise"),
@@ -300,7 +291,7 @@ jobs:
                   }
               }
 
-              public func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey : Any]) {
+              public func imagePickerController(_ picker: UIImagePickerController, didFinishPicking mediaWithInfo: [UIImagePickerController.InfoKey : Any]) {
                   picker.dismiss(animated: true)
 
                   guard let call = self.activeCall else { return }
@@ -328,7 +319,7 @@ jobs:
           }
 
           // MARK: - Native Local Notifications
-          @objc(LocalNotificationsPlugin)
+          @objc(LocalNotifications)
           public class LocalNotificationsPlugin: CAPPlugin, CAPBridgedPlugin {
               public let identifier = "LocalNotificationsPlugin"
               public let jsName = "LocalNotifications"
