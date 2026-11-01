@@ -168,8 +168,8 @@ jobs:
           class MainViewController: CAPBridgeViewController {
               override func capacitorDidLoad() {
                   super.capacitorDidLoad()
-                  bridge?.registerPluginInstance(CAPCameraPlugin())
-                  bridge?.registerPluginInstance(LocalNotificationsPlugin())
+                  self.bridge?.registerPluginInstance(CAPCameraPlugin())
+                  self.bridge?.registerPluginInstance(LocalNotificationsPlugin())
               }
           }
 
