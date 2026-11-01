@@ -22,9 +22,8 @@ jobs:
       - name: Install Dependencies
         run: |
           npm install --legacy-peer-deps
-          npm install @capacitor/core@8.4.3 @capacitor/ios@8.4.3 @capacitor/cli@8.4.3 --legacy-peer-deps
 
-      - name: Prepare Web Assets & Pin Stable Swift PM
+      - name: Prepare Web Assets & Configure Plugins
         run: |
           mkdir -p dist
           if [ -d "ios/App/App/public" ] && [ ! -f "dist/index.html" ]; then
@@ -37,10 +36,7 @@ jobs:
           # Clean legacy podspec folder
           rm -rf ios/capacitor-cordova-ios-plugins
 
-          # Pin capacitor-swift-pm to stable 8.4.3 across all plugins
-          find node_modules/@capacitor -name "Package.swift" -exec sed -i '' 's/from: "8.0.0"/exact: "8.4.3"/g' {} +
-
-          # Generate clean SPM Package.swift with stable 8.4.3
+          # Generate clean SPM Package.swift with stable verified plugins
           cat << 'EOF' > ios/App/CapApp-SPM/Package.swift
           // swift-tools-version: 5.9
           import PackageDescription
@@ -52,14 +48,13 @@ jobs:
                   .library(name: "CapApp-SPM", targets: ["CapApp-SPM"])
               ],
               dependencies: [
-                  .package(url: "https://github.com/ionic-team/capacitor-swift-pm.git", exact: "8.4.3"),
+                  .package(url: "https://github.com/ionic-team/capacitor-swift-pm.git", exact: "8.5.0"),
                   .package(name: "CapacitorApp", path: "../../../node_modules/@capacitor/app"),
                   .package(name: "CapacitorCamera", path: "../../../node_modules/@capacitor/camera"),
                   .package(name: "CapacitorClipboard", path: "../../../node_modules/@capacitor/clipboard"),
                   .package(name: "CapacitorDevice", path: "../../../node_modules/@capacitor/device"),
                   .package(name: "CapacitorHaptics", path: "../../../node_modules/@capacitor/haptics"),
                   .package(name: "CapacitorKeyboard", path: "../../../node_modules/@capacitor/keyboard"),
-                  .package(name: "CapacitorLocalNotifications", path: "../../../node_modules/@capacitor/local-notifications"),
                   .package(name: "CapacitorNetwork", path: "../../../node_modules/@capacitor/network")
               ],
               targets: [
@@ -74,7 +69,6 @@ jobs:
                           .product(name: "CapacitorDevice", package: "CapacitorDevice"),
                           .product(name: "CapacitorHaptics", package: "CapacitorHaptics"),
                           .product(name: "CapacitorKeyboard", package: "CapacitorKeyboard"),
-                          .product(name: "CapacitorLocalNotifications", package: "CapacitorLocalNotifications"),
                           .product(name: "CapacitorNetwork", package: "CapacitorNetwork")
                       ]
                   )
