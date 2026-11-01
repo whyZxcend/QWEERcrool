@@ -291,13 +291,13 @@ jobs:
                   }
               }
 
-              public func imagePickerController(_ picker: UIImagePickerController, didFinishPicking mediaWithInfo: [UIImagePickerController.InfoKey : Any]) {
+              public func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo mediaInfo: [UIImagePickerController.InfoKey: Any]) {
                   picker.dismiss(animated: true)
 
                   guard let call = self.activeCall else { return }
                   self.activeCall = nil
 
-                  guard let image = info[.originalImage] as? UIImage,
+                  guard let image = mediaInfo[UIImagePickerController.InfoKey.originalImage] as? UIImage,
                         let data = image.jpegData(compressionQuality: 0.85) else {
                       call.resolve([:])
                       return
