@@ -36,29 +36,42 @@ jobs:
           # Remove unused cordova podspec folder
           rm -rf ios/capacitor-cordova-ios-plugins
 
-      - name: Sync Capacitor iOS
+      - name: Create Shared Scheme
         run: |
-          npx cap sync ios || true
-          sed -i '' 's/\\/\//g' ios/App/CapApp-SPM/Package.swift 2>/dev/null || true
+          mkdir -p ios/App/App.xcodeproj/xcshareddata/xcschemes
+          cat << 'EOF' > ios/App/App.xcodeproj/xcshareddata/xcschemes/App.xcscheme
+          <?xml version="1.0" encoding="UTF-8"?>
+          <Scheme LastUpgradeVersion="1500" version="1.7">
+            <BuildAction parallelizeBuildables="YES" buildImplicitDependencies="YES">
+              <BuildActionEntries>
+                <BuildActionEntry buildForTesting="YES" buildForRunning="YES" buildForProfiling="YES" buildForArchiving="YES" buildForAnalyzing="YES">
+                  <BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="504EC3031FED79650016851F" BuildableName="App.app" BlueprintName="App" ReferencedContainer="container:App.xcodeproj" />
+                </BuildActionEntry>
+              </BuildActionEntries>
+            </BuildAction>
+          </Scheme>
+          EOF
 
-      - name: Build iOS Archive (Unsigned)
+      - name: Build iOS App (Unsigned)
         run: |
           cd ios/App
           xcodebuild -project App.xcodeproj \
             -scheme App \
             -configuration Release \
             -destination 'generic/platform=iOS' \
-            -archivePath build/App.xcarchive \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO \
+            -derivedDataPath build \
             CODE_SIGN_IDENTITY="" \
-            archive
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            build
 
       - name: Package into IPA
         run: |
           cd ios/App
           mkdir -p build/Payload
-          cp -R build/App.xcarchive/Products/Applications/App.app build/Payload/
+          APP_PATH=$(find build/Build/Products/Release-iphoneos -name "*.app" -type d | head -n 1)
+          echo "Found app at: $APP_PATH"
+          cp -R "$APP_PATH" build/Payload/
           cd build
           zip -qr QWERcrool.ipa Payload
           ls -lh QWERcrool.ipa
